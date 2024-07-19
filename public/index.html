@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website URL Redirect Checker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.6/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #333;
+        }
+        h1 {
+            font-weight: 700;
+            color: #4a90e2;
+            margin-bottom: 20px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 500px;
+        }
+        label {
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        input, button {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+            width: 100%;
+        }
+        input {
+            font-size: 16px;
+        }
+        button {
+            background-color: #4a90e2;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #357abd;
+        }
+        h2 {
+            margin-top: 20px;
+            font-weight: 700;
+            color: #333;
+        }
+        .table-container {
+            width: 100%;
+            max-width: 1000px;
+            overflow-x: auto;
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        thead {
+            background-color: #4a90e2;
+            color: #fff;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border: 1px solid #ddd;
+            white-space: nowrap;
+        }
+        th {
+            font-weight: 700;
+        }
+        tr:nth-child(even) {
+            background-color: #f4f4f9;
+        }
+        tr:hover {
+            background-color: #e0e7ff;
+        }
+        @media (max-width: 600px) {
+            th, td {
+                font-size: 14px;
+                padding: 8px;
+            }
+        }
+        .download-btn {
+            display: none;
+            margin-top: 20px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4a90e2;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .download-btn:hover {
+            background-color: #357abd;
+        }
+    </style>
+</head>
+<body>
+    <h1>Website URL Redirect Checker</h1>
+    <form id="siteForm">
+        <label for="siteUrl">Enter Website URL:</label>
+        <input type="text" id="siteUrl" name="siteUrl" required placeholder="https://example.com">
+        <button type="submit">Check URLs</button>
+    </form>
+    <h2>Results</h2>
+    <div class="table-container">
+        <table id="resultsTable">
+            <thead>
+                <tr>
+                    <th>Original URL</th>
+                    <th>Link Text</th>
+                    <th>ARIA Label</th>
+                    <th>Target</th>
+                    <th>Status Code</th>
+                    <th>Final URL</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+    <button class="download-btn" id="downloadExcel">Download Excel</button>
+
+    <script>
+        document.getElementById('siteForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const siteUrl = document.getElementById('siteUrl').value;
+            const resultsTableBody = document.querySelector('#resultsTable tbody');
+            const downloadBtn = document.getElementById('downloadExcel');
+            
+            resultsTableBody.innerHTML = ''; 
+            downloadBtn.style.display = 'none'; 
+
+            const eventSource = new EventSource(`http://localhost:3000/check-site-urls-stream?siteUrl=${encodeURIComponent(siteUrl)}`);
+            const rows = [];
+
+            eventSource.onmessage = function(event) {
+                const result = JSON.parse(event.data);
+                if (result) {
+                    rows.push(result); 
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${result.originalUrl}</td>
+                        <td>${result.linkText}</td>
+                        <td>${result.ariaLabel}</td>
+                        <td>${result.target}</td>
+                        <td>${result.statusCode}</td>
+                        <td>${result.finalUrl}</td>
+                    `;
+                    resultsTableBody.appendChild(row);
+                }
+            };
+
+            eventSource.onerror = function(error) {
+                console.error('EventSource failed:', error);
+                const row = document.createElement('tr');
+                row.innerHTML = `<td colspan="6">Error: ${error.message}</td>`;
+                resultsTableBody.appendChild(row);
+                eventSource.close();
+            };
+
+            eventSource.addEventListener('complete', () => {
+                downloadBtn.style.display = 'block';
+            });
+        });
+
+        document.getElementById('downloadExcel').addEventListener('click', () => {
+            const ws = XLSX.utils.table_to_sheet(document.getElementById('resultsTable'));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Results');
+            XLSX.writeFile(wb, 'Results.xlsx');
+        });
+    </script>
+</body>
+</html>
