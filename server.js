@@ -12,6 +12,8 @@ const queue = new PQueue({ concurrency: 10 });
 app.use(cors());
 app.use(express.json());
 
+const cache = new Map();
+
 const getAllContentFromPage = async (url, checkLinks, checkImages, excludeHeaderFooter) => {
     try {
         const { data } = await axios.get(url);
@@ -100,7 +102,7 @@ const getFinalRedirectUrl = async (url) => {
     }
 };
 
-app.get('/api/check-site-content', async (req, res) => {
+app.get('/check-site-content', async (req, res) => {
     const { siteUrl, checkLinks, checkImages, excludeHeaderFooter } = req.query;
     if (!siteUrl) {
         return res.status(400).json({ error: 'Site URL is required' });
@@ -170,4 +172,6 @@ app.get('/api/check-site-content', async (req, res) => {
     }
 });
 
-export default app;
+app.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
+});
