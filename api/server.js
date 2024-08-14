@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
-import * as cheerio from 'cheerio';
+import cheerio from 'cheerio';
 import PQueue from 'p-queue';
 
 const app = express();
@@ -88,17 +88,15 @@ const getFinalRedirectUrl = async (url) => {
         cache.set(url, result);
         return result;
     } catch (error) {
+        let finalUrl = 'Error';
+        let statusCode = 'N/A';
+
         if (error.response) {
-            return {
-                finalUrl: error.response.request.res.responseUrl || 'No final URL found',
-                statusCode: error.response.status
-            };
-        } else {
-            return {
-                finalUrl: 'Error',
-                statusCode: 'N/A'
-            };
+            finalUrl = error.response.request.res.responseUrl || 'No final URL found';
+            statusCode = error.response.status;
         }
+
+        return { finalUrl, statusCode };
     }
 };
 
