@@ -102,7 +102,7 @@ const getFinalRedirectUrl = async (url) => {
     }
 };
 
-app.get('/check-site-content', async (req, res) => {
+app.get('/api/check-site-content', async (req, res) => {
     const { siteUrl, checkLinks, checkImages, excludeHeaderFooter } = req.query;
     if (!siteUrl) {
         return res.status(400).json({ error: 'Site URL is required' });
@@ -172,6 +172,4 @@ app.get('/check-site-content', async (req, res) => {
     }
 });
 
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
-});
+export default app;
