@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import PQueue from 'p-queue';
 
 const app = express();
@@ -14,40 +14,62 @@ app.use(express.json());
 
 const cache = new Map();
 
-const getAllUrlsFromPage = async (url) => {
+const getAllContentFromPage = async (url, checkLinks, checkImages, excludeHeaderFooter) => {
     try {
         const { data } = await axios.get(url);
         const $ = cheerio.load(data, { normalizeWhitespace: true });
-        const urls = [];
-        $('a').each((_, element) => {
-            let href = $(element).attr('href');
-            const linkText = $(element).text();
-            const ariaLabel = $(element).attr('aria-label') || 'N/A';
-            const target = $(element).attr('target') || '_self';
+        const content = { links: [], images: [] };
 
-            if (href) {
-                href = href.startsWith('http') ? href : new URL(href, url).href;
-                urls.push({ href, linkText, ariaLabel, target });
+        if (excludeHeaderFooter) {
+            $('header, footer').remove();
+        }
+
+        const processElement = (element, location) => {
+            if (checkLinks && element.is('a')) {
+                let href = element.attr('href');
+                const linkText = element.text().trim();
+                const ariaLabel = element.attr('aria-label') || '';
+                const target = element.attr('target') || '_self';
+                const linkType = getLinkType(element);
+
+                if (href) {
+                    href = href.startsWith('http') ? href : new URL(href, url).href;
+                    content.links.push({ href, linkText, ariaLabel, target, linkType, location });
+                }
             }
-        });
-        return urls;
+
+            if (checkImages && element.is('img')) {
+                let src = element.attr('src');
+                const alt = element.attr('alt') || '';
+
+                if (src) {
+                    src = src.startsWith('http') ? src : new URL(src, url).href;
+                    const imgName = src.split('/').pop();
+                    content.images.push({ imgName, alt, location });
+                }
+            }
+
+            element.children().each((_, child) => processElement($(child), location));
+        };
+
+        if (excludeHeaderFooter) {
+            processElement($('body'), 'body');
+        } else {
+            processElement($('header'), 'header');
+            processElement($('body'), 'body');
+            processElement($('footer'), 'footer');
+        }
+
+        return content;
     } catch (error) {
         throw new Error(`Failed to fetch ${url}: ${error.message}`);
     }
 };
 
-const retryRequest = async (url, retries = 3) => {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            return await axios.get(url, {
-                maxRedirects: 10,
-                validateStatus: status => status >= 200 && status < 400,
-            });
-        } catch (error) {
-            if (attempt === retries) throw error;
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
+const getLinkType = (element) => {
+    if (element.is('button') || element.find('button').length > 0) return 'button';
+    if (element.hasClass('cta') || element.parents('.cta').length > 0) return 'cta';
+    return 'link';
 };
 
 const getFinalRedirectUrl = async (url) => {
@@ -55,7 +77,10 @@ const getFinalRedirectUrl = async (url) => {
         return cache.get(url);
     }
     try {
-        const response = await retryRequest(url);
+        const response = await axios.get(url, {
+            maxRedirects: 10,
+            validateStatus: status => status >= 200 && status < 400,
+        });
         const result = {
             finalUrl: response.request.res.responseUrl,
             statusCode: response.status
@@ -63,21 +88,22 @@ const getFinalRedirectUrl = async (url) => {
         cache.set(url, result);
         return result;
     } catch (error) {
-        if (error.code === 'ECONNRESET') {
-            return { finalUrl: 'Connection reset', statusCode: 'N/A' };
-        } else if (error.response) {
+        if (error.response) {
             return {
                 finalUrl: error.response.request.res.responseUrl || 'No final URL found',
                 statusCode: error.response.status
             };
         } else {
-            throw new Error(`Failed to fetch ${url}: ${error.message}`);
+            return {
+                finalUrl: 'Error',
+                statusCode: 'N/A'
+            };
         }
     }
 };
 
-app.get('/check-site-urls-stream', async (req, res) => {
-    const { siteUrl } = req.query;
+app.get('/check-site-content', async (req, res) => {
+    const { siteUrl, checkLinks, checkImages, excludeHeaderFooter } = req.query;
     if (!siteUrl) {
         return res.status(400).json({ error: 'Site URL is required' });
     }
@@ -88,35 +114,56 @@ app.get('/check-site-urls-stream', async (req, res) => {
     res.flushHeaders();
 
     try {
-        const urls = await getAllUrlsFromPage(siteUrl);
-        const tasks = urls.map(({ href, linkText, ariaLabel, target }) =>
-            queue.add(async () => {
-                try {
-                    const finalUrlData = await getFinalRedirectUrl(href);
-                    const result = {
-                        originalUrl: href,
-                        linkText,
-                        ariaLabel,
-                        target,
-                        statusCode: finalUrlData.statusCode,
-                        finalUrl: finalUrlData.finalUrl
-                    };
-                    res.write(`data: ${JSON.stringify(result)}\n\n`);
-                } catch (error) {
-                    const result = {
-                        originalUrl: href,
-                        linkText,
-                        ariaLabel,
-                        target,
-                        statusCode: 'N/A',
-                        finalUrl: `Error: ${error.message}`
-                    };
-                    res.write(`data: ${JSON.stringify(result)}\n\n`);
-                }
-            })
-        );
+        const content = await getAllContentFromPage(siteUrl, checkLinks === 'true', checkImages === 'true', excludeHeaderFooter === 'true');
+        
+        if (checkLinks === 'true') {
+            const linkTasks = content.links.map(({ href, linkText, ariaLabel, target, linkType, location }) =>
+                queue.add(async () => {
+                    try {
+                        const finalUrlData = await getFinalRedirectUrl(href);
+                        const result = {
+                            type: 'link',
+                            linkType,
+                            linkText,
+                            ariaLabel,
+                            originalUrl: href,
+                            finalUrl: finalUrlData.finalUrl,
+                            statusCode: finalUrlData.statusCode,
+                            target,
+                            location
+                        };
+                        res.write(`data: ${JSON.stringify(result)}\n\n`);
+                    } catch (error) {
+                        const result = {
+                            type: 'link',
+                            linkType,
+                            linkText,
+                            ariaLabel,
+                            originalUrl: href,
+                            finalUrl: 'Error',
+                            statusCode: 'N/A',
+                            target,
+                            location
+                        };
+                        res.write(`data: ${JSON.stringify(result)}\n\n`);
+                    }
+                })
+            );
+            await Promise.all(linkTasks);
+        }
 
-        await Promise.all(tasks);
+        if (checkImages === 'true') {
+            content.images.forEach(({ imgName, alt, location }) => {
+                const result = {
+                    type: 'image',
+                    imgName,
+                    alt,
+                    location
+                };
+                res.write(`data: ${JSON.stringify(result)}\n\n`);
+            });
+        }
+
         res.write('event: complete\ndata: {"status": "complete"}\n\n');
         res.end();
     } catch (error) {
