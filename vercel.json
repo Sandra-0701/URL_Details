@@ -1,17 +1,9 @@
 {
   "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "server.js",
-      "use": "@vercel/node",
-      "config": {}
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/check-site-content",
-      "methods": ["GET"],
-      "dest": "server.js"
+      "source": "/(.*))",
+      "destination": "/index.html"
     }
   ]
 }
